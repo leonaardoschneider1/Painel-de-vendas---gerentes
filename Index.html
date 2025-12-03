@@ -1,0 +1,730 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard de Vendas AI</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              background: '#0B1121',
+              card: '#151E32',
+              primary: '#E2F64E',
+              secondary: '#38BDF8',
+              muted: '#64748B',
+              border: '#1E293B',
+              'text-main': '#F8FAFC',
+              'text-dim': '#94A3B8',
+              success: '#10b981',
+              warning: '#f59e0b',
+              danger: '#ef4444',
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+          }
+        }
+      }
+    </script>
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    
+    <style>
+      body { font-family: 'Inter', sans-serif; background-color: #0B1121; color: #F8FAFC; overflow-x: hidden; }
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: #0B1121; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 3px; }
+      .leaflet-container { background: #0B1121 !important; font-family: 'Inter', sans-serif; outline: none; }
+      .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #151E32 !important; color: #F8FAFC !important; border: 1px solid #334155; }
+      .leaflet-tooltip { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+      .glow-text { text-shadow: 0 0 10px rgba(226, 246, 78, 0.3); }
+      .custom-tooltip { background: transparent; border: none; box-shadow: none; }
+      #map-container { height: 100%; width: 100%; z-index: 1; }
+    </style>
+
+    <!-- LIBS GLOBAIS -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Google Generative AI -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/generative-ai": "https://esm.run/@google/generative-ai"
+        }
+      }
+    </script>
+    <script type="module">
+      import { GoogleGenerativeAI } from "@google/generative-ai";
+      window.GoogleGenerativeAI = GoogleGenerativeAI;
+    </script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      // --- CONFIGURAÇÃO ---
+      const API_KEY = 'AIzaSyAbJ5y94pIBnCNoUVQtdio21LPzqgDvMzg'; 
+
+      const { useState, useEffect, useMemo, useRef } = React;
+      const { createRoot } = ReactDOM;
+      
+      const Channel = { RC: 'RC', WEB: 'WEB', VD: 'VD', TV: 'TV' };
+
+      // --- COMPONENTE MULTI-SELECT PERSONALIZADO (Design High-Fidelity) ---
+      const MultiSelectDropdown = ({ label, options, selected, onChange, disabled }) => {
+          const [isOpen, setIsOpen] = useState(false);
+          const dropdownRef = useRef(null);
+
+          useEffect(() => {
+              const handleClickOutside = (event) => {
+                  if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                      setIsOpen(false);
+                  }
+              };
+              document.addEventListener('mousedown', handleClickOutside);
+              return () => document.removeEventListener('mousedown', handleClickOutside);
+          }, []);
+
+          const toggleOption = (option) => {
+              if (selected.includes(option)) onChange(selected.filter(item => item !== option));
+              else onChange([...selected, option]);
+          };
+
+          const toggleAll = () => {
+              if (selected.length === options.length) onChange([]);
+              else onChange(options);
+          };
+
+          const displayText = selected.length === 0 
+              ? 'Selecione...' 
+              : selected.length === options.length 
+                  ? 'Todos selecionados' 
+                  : selected.length === 1 
+                      ? selected[0] 
+                      : `${selected.length} selecionados`;
+
+          return (
+              <div className="relative" ref={dropdownRef}>
+                  <label className="block text-xs font-bold text-primary uppercase tracking-wider mb-2">{label}</label>
+                  <button
+                      onClick={() => !disabled && setIsOpen(!isOpen)}
+                      disabled={disabled}
+                      className={`w-full bg-background border border-white/10 text-left rounded-lg px-4 py-3 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors flex justify-between items-center ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/50'}`}
+                  >
+                      <span className={`text-sm truncate block mr-4 ${selected.length === 0 ? 'text-text-dim' : 'text-text-main'}`}>
+                          {displayText}
+                      </span>
+                      <svg className={`w-4 h-4 text-text-dim transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+
+                  {isOpen && (
+                      <div className="absolute z-50 w-full mt-1 bg-[#151E32] border border-primary/20 rounded-lg shadow-xl max-h-60 overflow-y-auto custom-scrollbar">
+                          <div className="p-2 border-b border-white/5 sticky top-0 bg-[#151E32] z-10">
+                               <button onClick={toggleAll} className="w-full text-left px-2 py-1.5 text-xs font-bold text-primary hover:bg-white/5 rounded transition-colors">
+                                  {selected.length === options.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                               </button>
+                          </div>
+                          <div className="p-2 space-y-1">
+                              {options.map(option => (
+                                  <div key={option} onClick={() => toggleOption(option)} className="flex items-center gap-3 px-2 py-2 hover:bg-white/5 rounded cursor-pointer group transition-colors">
+                                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selected.includes(option) ? 'bg-primary border-primary' : 'border-text-dim group-hover:border-primary'}`}>
+                                          {selected.includes(option) && <svg className="w-3 h-3 text-background font-bold" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                      </div>
+                                      <span className={`text-sm ${selected.includes(option) ? 'text-white font-medium' : 'text-text-dim'}`}>{option}</span>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  )}
+              </div>
+          );
+      };
+
+      // --- GEO LOGIC (Compressed) ---
+      const RAW_CITIES_CSV = `PR,ABATIA,-23.3049,-50.3133|PR,ADRIANOPOLIS,-24.6606,-48.9922|PR,AGUDOS DO SUL,-25.9899,-49.3343|PR,ALMIRANTE TAMANDARE,-25.3188,-49.3037|PR,ALTAMIRA DO PARANA,-24.7983,-52.7128|PR,ALTO PARAISO,-26.1146,-52.7469|PR,ALTO PARANA,-23.1312,-52.3189|PR,ALTO PIQUIRI,-24.0224,-53.44|PR,ALTONIA,-23.8759,-53.8958|PR,ALVORADA DO SUL,-22.7813,-51.2297|PR,AMAPORA,-23.0943,-52.7866|PR,AMPERE,-25.9168,-53.4686|PR,ANAHY,-24.6449,-53.1332|PR,ANDIRA,-23.0533,-50.2304|PR,ANGULO,-23.1946,-51.9154|PR,ANTONINA,-25.4386,-48.7191|PR,ANTONIO OLINTO,-25.9804,-50.1972|PR,APUCARANA,-23.55,-51.4635|PR,ARAPONGAS,-23.4153,-51.4259|PR,ARAPOTI,-24.1548,-49.8285|PR,ARAPUA,-24.3132,-51.7856|PR,ARARUNA,-23.9315,-52.5021|PR,ARAUCARIA,-25.5859,-49.4047|PR,ARIRANHA DO IVAI,-24.3857,-51.5839|PR,ASSAI,-23.3697,-50.8459|PR,ASSIS CHATEAUBRIAND,-24.4168,-53.5213|PR,ASTORGA,-23.2318,-51.6668|PR,ATALAIA,-23.1517,-52.0551|PR,BALSA NOVA,-25.5804,-49.6291|PR,BANDEIRANTES,-23.1078,-50.3704|PR,BARBOSA FERRAZ,-24.0334,-52.004|PR,BARRA DO JACARE,-23.116,-50.1842|PR,BARRACAO,-26.2502,-53.6324|PR,BELA VISTA DA CAROBA,-25.8842,-53.6725|PR,BELA VISTA DO PARAISO,-22.9937,-51.1927|PR,BITURUNA,-26.1607,-51.5518|PR,BOA ESPERANCA,-24.2467,-52.7876|PR,BOA VENTURA DE SAO ROQUE,-24.8688,-51.6276|PR,BOA VISTA DA APARECIDA,-25.4308,-53.4117|PR,BOCAIUVA DO SUL,-25.2066,-49.1141|PR,BOM SUCESSO,-23.7063,-51.7671|PR,BOM SUCESSO DO SUL,-26.0731,-52.8353|PR,BORRAZOPOLIS,-23.9366,-51.5875|PR,BRAGANEY,-24.8173,-53.1218|PR,BRASILANDIA DO SUL,-24.1978,-53.5275|PR,CAFEARA,-22.789,-51.7142|PR,CAFELANDIA,-24.6189,-53.3207|PR,CAFEZAL DO SUL,-23.9005,-53.5124|PR,CALIFORNIA,-23.6566,-51.3574|PR,CAMBARA,-23.0423,-50.0753|PR,CAMBE,-23.2766,-51.2798|PR,CAMBIRA,-23.589,-51.5792|PR,CAMPINA DA LAGOA,-24.5893,-52.7976|PR,CAMPINA DO SIMAO,-25.0802,-51.8237|PR,CAMPINA GRANDE DO SUL,-25.3044,-49.0551|PR,CAMPO BONITO,-25.0294,-52.9939|PR,CAMPO DO TENENTE,-25.98,-49.6844|PR,CAMPO LARGO,-25.4525,-49.529|PR,CAMPO MAGRO,-25.3687,-49.4501|PR,CAMPO MOURAO,-24.0463,-52.378|PR,CANDIDO DE ABREU,-24.5649,-51.3372|PR,CANDOI,-25.5758,-52.0409|PR,CANTAGALO,-25.3734,-52.1198|PR,CAPANEMA,-25.6691,-53.8055|PR,CAPITAO LEONIDAS MARQUES,-25.4816,-53.6112|PR,CARAMBEI,-24.9152,-50.0986|PR,CARLOPOLIS,-23.4269,-49.7235|PR,CASCAVEL,-24.9573,-53.459|PR,CASTRO,-24.7891,-50.0108|PR,CATANDUVAS,-25.2044,-53.1548|PR,CENTENARIO DO SUL,-22.8188,-51.5973|PR,CERRO AZUL,-26.0891,-52.8691|PR,CEU AZUL,-25.1489,-53.8415|PR,CHOPINZINHO,-25.8515,-52.5173|PR,CIANORTE,-23.6599,-52.6054|PR,CIDADE GAUCHA,-23.3772,-52.9436|PR,CLEVELANDIA,-26.4043,-52.3508|PR,COLOMBO,-25.2925,-49.2262|PR,COLORADO,-22.8374,-51.9743|PR,CONGONHINHAS,-23.5493,-50.5569|PR,CONSELHEIRO MAIRINCK,-23.623,-50.1707|PR,CONTENDA,-25.6788,-49.535|PR,CORBELIA,-24.7971,-53.3006|PR,CORNELIO PROCOPIO,-23.1829,-50.6498|PR,CORONEL DOMINGOS SOARES,-26.2277,-52.0356|PR,CORONEL VIVIDA,-25.9767,-52.5641|PR,CORUMBATAI DO SUL,-24.101,-52.1177|PR,CRUZ MACHADO,-26.0166,-51.343|PR,CRUZEIRO DO IGUACU,-25.6192,-53.1285|PR,CRUZEIRO DO OESTE,-23.7799,-53.0774|PR,CRUZEIRO DO SUL,-22.9624,-52.1622|PR,CRUZMALTINA,-24.0132,-51.4563|PR,CURITIBA,-25.4195,-49.2646|PR,CURIUVA,-24.0362,-50.4576|PR,DIAMANTE DO NORTE,-22.655,-52.8617|PR,DIAMANTE DO OESTE,-24.9462,-54.103|PR,DIAMANTE DO SUL,-25.035,-52.6768|PR,DOIS VIZINHOS,-25.7407,-53.057|PR,DOURADINA,-23.3807,-53.2918|PR,DOUTOR ULYSSES,-24.5665,-49.4219|PR,ENEAS MARQUES,-25.9445,-53.1659|PR,ENGENHEIRO BELTRAO,-23.797,-52.2659|PR,ENTRE RIOS DO OESTE,-24.7042,-54.2385|PR,ESPERANCA NOVA,-23.7238,-53.811|PR,ESPIGAO ALTO DO IGUACU,-25.4216,-52.8348|PR,FAROL,-24.0958,-52.6217|PR,FAXINAL,-24.0077,-51.3227|PR,FAZENDA RIO GRANDE,-25.6624,-49.3073|PR,FENIX,-23.9135,-51.9805|PR,FIGUEIRA,-23.8455,-50.4031|PR,FLOR DA SERRA DO SUL,-26.2523,-53.3092|PR,FLORAI,-23.3178,-52.3029|PR,FLORESTA,-23.6031,-52.0807|PR,FLORESTOPOLIS,-22.8623,-51.3882|PR,FLORIDA,-23.0847,-51.9546|PR,FORMOSA DO OESTE,-24.2951,-53.3114|PR,FOZ DO IGUACU,-25.5427,-54.5827|PR,FOZ DO JORDAO,-25.7371,-52.1188|PR,FRANCISCO ALVES,-24.0667,-53.8461|PR,FRANCISCO BELTRAO,-26.0817,-53.0535|PR,GENERAL CARNEIRO,-26.425,-51.3172|PR,GODOY MOREIRA,-24.173,-51.9246|PR,GOIOERE,-24.1835,-53.0248|PR,GOIOXIM,-25.1927,-51.9911|PR,GRANDES RIOS,-24.1466,-51.5094|PR,GUAIRA,-24.085,-54.2573|PR,GUAIRACA,-22.932,-52.6906|PR,GUAMIRANGA,-25.1912,-50.8021|PR,GUAPIRAMA,-23.5203,-50.0407|PR,GUAPOREMA,-23.3402,-52.7786|PR,GUARACI,-22.9694,-51.6504|PR,GUARANIACU,-25.0968,-52.8755|PR,GUARAPUAVA,-25.3902,-51.4623|PR,GUARATUBA,-25.8817,-48.5752|PR,HONORIO SERPA,-26.139,-52.3848|PR,IBAITI,-23.8478,-50.1932|PR,IBEMA,-25.1193,-53.0072|PR,IBIPORA,-23.2659,-51.0522|PR,ICARAIMA,-23.3944,-53.615|PR,IGUARACU,-23.1949,-51.8256|PR,IGUATU,-24.7153,-53.0827|PR,IMBAU,-24.448,-50.7533|PR,IMBITUVA,-25.2285,-50.5989|PR,INACIO MARTINS,-25.5704,-51.0769|PR,INAJA,-22.7509,-52.1995|PR,IPIRANGA,-25.0238,-50.5794|PR,IPORA,-24.0083,-53.706|PR,IRATI,-25.4697,-50.6493|PR,IRETAMA,-24.4253,-52.1012|PR,ITAGUAJE,-22.6183,-51.9674|PR,ITAIPULANDIA,-25.1366,-54.3001|PR,ITAMBARACA,-23.0181,-50.4097|PR,ITAMBE,-23.6601,-51.9912|PR,ITAPEJARA DO OESTE,-25.9661,-52.8147|PR,ITAPERUCU,-25.2193,-49.3454|PR,IVAI,-25.0067,-50.857|PR,IVAIPORA,-24.2485,-51.6754|PR,IVATE,-23.4072,-53.3687|PR,JABOTI,-23.7435,-50.0729|PR,JACAREZINHO,-23.1591,-49.9739|PR,JAGUAPITA,-23.1104,-51.5342|PR,JAGUARIAIVA,-24.2439,-49.7066|PR,JANDAIA DO SUL,-23.6011,-51.6448|PR,JANIOPOLIS,-24.1401,-52.7784|PR,JAPIRA,-23.8142,-50.1422|PR,JAPURA,-23.4693,-52.5557|PR,JARDIM ALEGRE,-24.1809,-51.6902|PR,JARDIM OLINDA,-22.5523,-52.0503|PR,JATAIZINHO,-23.2578,-50.9777|PR,JESUITAS,-24.3839,-53.3849|PR,JOAQUIM TAVORA,-23.4987,-49.909|PR,JUNDIAI DO SUL,-23.4357,-50.2496|PR,JURANDA,-24.4209,-52.8413|PR,JUSSARA,-23.6219,-52.4693|PR,KALORE,-23.8188,-51.6687|PR,LAPA,-25.7671,-49.7168|PR,LARANJAL,-24.8862,-52.47|PR,LARANJEIRAS DO SUL,-25.4077,-52.4109|PR,LEOPOLIS,-23.0818,-50.7511|PR,LIDIANOPOLIS,-24.11,-51.6506|PR,LINDOESTE,-25.2596,-53.5733|PR,LOANDA,-22.9232,-53.1362|PR,LOBATO,-23.0058,-51.9524|PR,LONDRINA,-23.304,-51.1691|PR,LUIZIANA,-24.2853,-52.269|PR,LUNARDELLI,-24.0821,-51.7368|PR,LUPIONOPOLIS,-22.755,-51.6601|PR,MALLET,-25.8806,-50.8173|PR,MAMBORE,-24.317,-52.5271|PR,MANDAGUACU,-23.3458,-52.0944|PR,MANDAGUARI,-23.5446,-51.671|PR,MANDIRITUBA,-25.777,-49.3282|PR,MANFRINOPOLIS,-26.1441,-53.3113|PR,MANGUEIRINHA,-25.9421,-52.1743|PR,MANOEL RIBAS,-24.5144,-51.6658|PR,MARECHAL CANDIDO RONDON,-24.557,-54.0571|PR,MARIA HELENA,-23.6158,-53.2053|PR,MARIALVA,-23.4843,-51.7928|PR,MARILANDIA DO SUL,-23.7425,-51.3137|PR,MARILENA,-22.7336,-53.0402|PR,MARILUZ,-24.0089,-53.1432|PR,MARINGA,-23.4205,-51.9333|PR,MARIOPOLIS,-26.355,-52.5532|PR,MARIPA,-24.42,-53.8286|PR,MARMELEIRO,-26.1472,-53.0267|PR,MARQUINHO,-25.112,-52.2497|PR,MARUMBI,-23.7058,-51.6404|PR,MATELANDIA,-25.2496,-53.9935|PR,MATINHOS,-25.8237,-48.549|PR,MATO RICO,-24.6995,-52.1454|PR,MAUA DA SERRA,-23.8988,-51.2277|PR,MEDIANEIRA,-25.2977,-54.0943|PR,MERCEDES,-24.4538,-54.1618|PR,MISSAL,-25.0919,-54.2477|PR,MOREIRA SALES,-24.0509,-53.0102|PR,MORRETES,-25.4744,-48.8345|PR,MUNHOZ DE MELLO,-23.1477,-51.7739|PR,NOSSA SENHORA DAS GRACAS,-22.9129,-51.7978|PR,NOVA AMERICA DA COLINA,-23.3308,-50.7168|PR,NOVA AURORA,-24.5289,-53.2575|PR,NOVA CANTU,-24.6723,-52.5661|PR,NOVA ESPERANCA,-23.182,-52.2031|PR,NOVA ESPERANCA DO SUDOESTE,-25.9004,-53.2618|PR,NOVA FATIMA,-23.4324,-50.5665|PR,NOVA LARANJEIRAS,-25.3054,-52.5447|PR,NOVA LONDRINA,-22.7639,-52.9868|PR,NOVA OLIMPIA,-23.4703,-53.0898|PR,NOVA PRATA DO IGUACU,-25.6309,-53.3469|PR,NOVA SANTA BARBARA,-23.5865,-50.7598|PR,NOVA SANTA ROSA,-24.4693,-53.9552|PR,NOVA TEBAS,-24.438,-51.9454|PR,NOVO ITACOLOMI,-23.7631,-51.5079|PR,ORTIGUEIRA,-24.2058,-50.9185|PR,OURIZONA,-23.4053,-52.1964|PR,PAICANDU,-23.4555,-52.046|PR,PALMAS,-26.4839,-51.9888|PR,PALMEIRA,-25.4257,-50.007|PR,PALMITAL,-24.8853,-52.2029|PR,PALOTINA,-24.2868,-53.8404|PR,PARAISO DO NORTE,-23.2824,-52.6054|PR,PARANACITY,-22.9297,-52.1549|PR,PARANAGUA,-25.5161,-48.5225|PR,PARANAPOEMA,-22.6412,-52.0905|PR,PARANAVAI,-23.0816,-52.4617|PR,PATO BRAGADO,-24.6271,-54.2265|PR,PATO BRANCO,-26.2292,-52.6706|PR,PAULA FREITAS,-26.2105,-50.931|PR,PAULO FRONTIN,-26.0466,-50.8304|PR,PEABIRU,-23.914,-52.3431|PR,PEROBAL,-23.8949,-53.4098|PR,PEROLA,-23.8039,-53.6834|PR,PEROLA DO OESTE,-25.759,-53.8055|PR,PIEN,-26.0965,-49.4336|PR,PINHAIS,-25.4429,-49.1927|PR,PINHALAO,-23.7982,-50.0536|PR,PINHAO,-25.6944,-51.6536|PR,PIRAI DO SUL,-24.5306,-49.9433|PR,PIRAQUARA,-25.4422,-49.0624|PR,PITANGA,-24.7588,-51.7596|PR,PITANGUEIRAS,-23.2281,-51.5873|PR,PLANALTINA DO PARANA,-23.0101,-52.9162|PR,PLANALTO,-25.7211,-53.7642|PR,PONTA GROSSA,-25.0916,-50.1668|PR,PONTAL DO PARANA,-25.6735,-48.5111|PR,PORECATU,-22.7537,-51.3795|PR,PORTO AMAZONAS,-25.54,-49.8946|PR,PORTO BARREIRO,-25.5477,-52.4067|PR,PORTO RICO,-22.7747,-53.2677|PR,PORTO VITORIA,-26.1674,-51.231|PR,PRADO FERREIRA,-23.0357,-51.4429|PR,PRANCHITA,-26.0209,-53.7397|PR,PRESIDENTE CASTELO BRANCO,-23.2782,-52.1536|PR,PRIMEIRO DE MAIO,-22.8517,-51.0293|PR,PRUDENTOPOLIS,-25.2111,-50.9754|PR,QUARTO CENTENARIO,-24.2775,-53.0759|PR,QUATIGUA,-23.5671,-49.916|PR,QUATRO BARRAS,-25.3673,-49.0763|PR,QUATRO PONTES,-24.5752,-53.9759|PR,QUEDAS DO IGUACU,-25.4492,-52.9102|PR,QUERENCIA DO NORTE,-23.0838,-53.483|PR,QUINTA DO SOL,-23.8533,-52.1309|PR,QUITANDINHA,-25.8734,-49.4973|PR,RAMILANDIA,-25.1195,-54.023|PR,RANCHO ALEGRE,-23.0676,-50.9145|PR,RANCHO ALEGRE D OESTE,-24.2778,-53.075|PR,REALEZA,-25.7711,-53.526|PR,REBOUCAS,-25.6232,-50.6877|PR,RENASCENCA,-26.1588,-52.9703|PR,RESERVA,-24.6492,-50.8466|PR,RESERVA DO IGUACU,-25.8319,-52.0272|PR,RIBEIRAO CLARO,-23.1941,-49.7597|PR,RIBEIRAO DO PINHAL,-23.4091,-50.3601|PR,RIO AZUL,-25.7306,-50.7985|PR,RIO BOM,-23.7606,-51.4122|PR,RIO BONITO DO IGUACU,-25.4874,-52.5292|PR,RIO BRANCO DO IVAI,-24.3244,-51.3187|PR,RIO BRANCO DO SUL,-25.1892,-49.3115|PR,RIO NEGRO,-26.095,-49.7982|PR,ROLANDIA,-23.3101,-51.3659|PR,RONCADOR,-24.5958,-52.2716|PR,RONDON,-23.412,-52.7659|PR,ROSARIO DO IVAI,-24.2682,-51.272|PR,SABAUDIA,-23.3155,-51.555|PR,SALGADO FILHO,-26.1777,-53.3631|PR,SALTO DO ITARARE,-23.6074,-49.6354|PR,SALTO DO LONTRA,-25.7813,-53.3135|PR,SANTA AMELIA,-23.2654,-50.4288|PR,SANTA CECILIA DO PAVAO,-23.5201,-50.7835|PR,SANTA CRUZ DE MONTE CASTELO,-22.9582,-53.2949|PR,SANTA FE,-23.04,-51.808|PR,SANTA HELENA,-24.8585,-54.336|PR,SANTA ISABEL DO IVAI,-23.0025,-53.1989|PR,SANTA IZABEL DO OESTE,-25.8217,-53.4801|PR,SANTA LUCIA,-25.4104,-53.5638|PR,SANTA MARIA DO OESTE,-24.9377,-51.8696|PR,SANTA MARIANA,-23.1465,-50.5167|PR,SANTA MONICA,-23.108,-53.1103|PR,SANTA TEREZA DO OESTE,-25.0543,-53.6274|PR,SANTA TEREZINHA DE ITAIPU,-25.4391,-54.402|PR,SANTANA DO ITARARE,-23.7587,-49.6293|PR,SANTO ANTONIO DA PLATINA,-23.2959,-50.0815|PR,SANTO ANTONIO DO CAIUA,-22.7351,-52.344|PR,SANTO ANTONIO DO PARAISO,-23.4969,-50.6455|PR,SANTO ANTONIO DO SUDOESTE,-26.0737,-53.7251|PR,SANTO INACIO,-22.6957,-51.7969|PR,SAO CARLOS DO IVAI,-23.3158,-52.4761|PR,SAO JERONIMO DA SERRA,-23.7218,-50.7475|PR,SAO JOAO,-25.8214,-52.7252|PR,SAO JOAO DO CAIUA,-22.8535,-52.3411|PR,SAO JOAO DO IVAI,-23.9833,-51.8215|PR,SAO JOAO DO TRIUNFO,-25.683,-50.2949|PR,SAO JORGE D OESTE,-25.4389,-53.5269|PR,SAO JORGE DO IVAI,-23.4336,-52.2929|PR,SAO JORGE DO PATROCINIO,-23.7647,-53.8823|PR,SAO JOSE DA BOA VISTA,-23.9122,-49.6577|PR,SAO JOSE DOS PINHAIS,-25.5313,-49.2031|PR,SAO MATEUS DO SUL,-25.8677,-50.384|PR,SAO MIGUEL DO IGUACU,-25.3492,-54.2405|PR,SAO PEDRO DO IGUACU,-24.9373,-53.8521|PR,SAO PEDRO DO IVAI,-23.8634,-51.8568|PR,SAO SEBASTIAO DA AMOREIRA,-23.4656,-50.7625|PR,SAPOPEMA,-23.9078,-50.5801|PR,SARANDI,-23.4441,-51.876|PR,SAUDADE DO IGUACU,-25.6917,-52.6184|PR,SENGES,-24.1129,-49.4616|PR,SERRANOPOLIS DO IGUACU,-25.3799,-54.0518|PR,SERTANEJA,-23.0361,-50.8317|PR,SERTANOPOLIS,-23.0571,-51.0399|PR,SIQUEIRA CAMPOS,-23.6875,-49.8304|PR,SULINA,-25.7066,-52.7299|PR,TAMARANA,-23.7204,-51.0991|PR,TAMBOARA,-23.2036,-52.4743|PR,TAPEJARA,-23.7315,-52.8735|PR,TAPIRA,-23.3193,-53.0684|PR,TEIXEIRA SOARES,-25.3701,-50.4571|PR,TELEMACO BORBA,-24.3245,-50.6176|PR,TERRA BOA,-23.7683,-52.447|PR,TERRA RICA,-22.7111,-52.6188|PR,TERRA ROXA,-24.1575,-54.0988|PR,TIBAGI,-24.5153,-50.4176|PR,TIJUCAS DO SUL,-25.9311,-49.195|PR,TOLEDO,-24.7246,-53.7412|PR,TOMAZINA,-23.7796,-49.9499|PR,TRES BARRAS DO PARANA,-25.4185,-53.1833|PR,TUNAS DO PARANA,-24.9731,-49.0879|PR,TUNEIRAS DO OESTE,-23.8648,-52.8769|PR,TUPASSI,-24.5879,-53.5105|PR,TURVO,-25.0437,-51.5282|PR,UBIRATA,-24.5393,-52.9865|PR,UMUARAMA,-23.7656,-53.3201|PR,UNIAO DA VITORIA,-26.2273,-51.0873|PR,UNIFLOR,-23.0868,-52.1573|PR,URAI,-23.2,-50.7939|PR,VENTANIA,-24.2458,-50.2376|PR,VERA CRUZ DO OESTE,-25.0577,-53.8771|PR,VERE,-25.8772,-52.9051|PR,VIRMOND,-25.3829,-52.1987|PR,VITORINO,-26.2683,-52.7843|PR,WENCESLAU BRAZ,-23.8742,-49.8032|PR,XAMBRE,-23.7364,-53.4884`;
+
+      let cityCoordsCache = null;
+      const getCityCoords = (city, state) => {
+          if (!cityCoordsCache) {
+              cityCoordsCache = {};
+              const rows = RAW_CITIES_CSV.split('|');
+              rows.forEach(row => {
+                  const [uf, name, lat, lng] = row.split(',');
+                  const key = `${name.toUpperCase().trim()}-${uf.toUpperCase().trim()}`;
+                  cityCoordsCache[key] = [parseFloat(lat), parseFloat(lng)];
+              });
+          }
+          const cleanCity = city.toUpperCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-.*/, '').replace(/\/.*/, '').trim();
+          const cleanState = state.toUpperCase().trim();
+          if (cleanState) {
+              const key = `${cleanCity}-${cleanState}`;
+              if (cityCoordsCache[key]) return cityCoordsCache[key];
+          }
+          if (!cleanState || cleanState === '') {
+              const possibleKey = Object.keys(cityCoordsCache).find(k => k.startsWith(`${cleanCity}-`));
+              if (possibleKey) return cityCoordsCache[possibleKey];
+          }
+          return undefined;
+      };
+
+      const filterData = (data, filters) => {
+        return data.filter(record => {
+          const recordMonth = record.date.substring(0, 7); 
+          const inDateRange = recordMonth >= filters.startMonth && recordMonth <= filters.endMonth;
+          const matches = (val, fVals) => !fVals || fVals.length === 0 || fVals.includes('all') || fVals.includes(val);
+          return matches(record.division, filters.division) && 
+                 matches(record.region, filters.region) && 
+                 matches(record.sector, filters.sector) && 
+                 matches(record.salesRep, filters.salesRep) && 
+                 matches(record.channel, filters.channel) && 
+                 matches(record.supplier, filters.supplier) && 
+                 inDateRange;
+        });
+      };
+
+      const calculateKPIs = (data) => {
+          const totalRevenue = data.reduce((acc, curr) => acc + curr.amount, 0);
+          
+          const clientNetRevenue = {};
+          data.forEach(r => { clientNetRevenue[r.cnpj] = (clientNetRevenue[r.cnpj] || 0) + r.amount; });
+          const activeClients = Object.entries(clientNetRevenue).filter(([_, netVal]) => netVal > 0).map(([id]) => id);
+          const positivacao = activeClients.length;
+          
+          const sales = data.filter(r => r.operClass === 'VD');
+          const returns = data.filter(r => r.operClass === 'DV');
+          
+          const distinctOrdersVD = new Set(sales.map(r => r.orderId)).size;
+          const distinctOrdersDV = new Set(returns.map(r => r.orderId)).size;
+          const totalOrders = Math.max(0, distinctOrdersVD - distinctOrdersDV);
+          
+          const averageTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+        
+          const clientSkuMap = {};
+          data.forEach(r => {
+              if (!clientSkuMap[r.cnpj]) clientSkuMap[r.cnpj] = { vd: new Set(), dv: new Set() };
+              if (r.operClass === 'VD') clientSkuMap[r.cnpj].vd.add(r.productCode);
+              else if (r.operClass === 'DV') clientSkuMap[r.cnpj].dv.add(r.productCode);
+          });
+          
+          let totalNetSkus = 0;
+          activeClients.forEach(cnpj => {
+              if (clientSkuMap[cnpj]) {
+                  const netSkus = Math.max(0, clientSkuMap[cnpj].vd.size - clientSkuMap[cnpj].dv.size);
+                  totalNetSkus += netSkus;
+              }
+          });
+          const skuPerPdv = positivacao > 0 ? totalNetSkus / positivacao : 0;
+        
+          let totalWeightedInstallments = 0;
+          let totalSalesForInstallments = 0;
+          sales.forEach(r => {
+            if (r.paymentTerms) {
+                let count = 0;
+                const matches = r.paymentTerms.match(/\d{2}\/\d{2}\/\d{4}/g);
+                if (matches && matches.length > 0) count = matches.length;
+                else { const c = r.paymentTerms.split(/[-\/]/).filter(s => s.trim().length > 0).length; if(c > 0) count = c; }
+                if (count > 0) { totalWeightedInstallments += (count * r.amount); totalSalesForInstallments += r.amount; }
+            }
+          });
+          const avgInstallments = totalSalesForInstallments > 0 ? totalWeightedInstallments / totalSalesForInstallments : 0;
+        
+          let totalWeightedDays = 0;
+          let totalSalesForTerm = 0;
+          const orderTermCache = {};
+          sales.forEach(r => {
+            if (r.paymentTerms && r.date) {
+              let avgDays = 0;
+              if (orderTermCache[r.orderId] !== undefined) avgDays = orderTermCache[r.orderId];
+              else {
+                  const [y, m, d] = r.date.split('-').map(Number);
+                  const nfeDate = new Date(y, m - 1, d);
+                  const dateMatches = [...r.paymentTerms.matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)];
+                  if (dateMatches.length > 0) {
+                      let totalDays = 0;
+                      dateMatches.forEach(match => {
+                          const dueDate = new Date(parseInt(match[3]), parseInt(match[2]) - 1, parseInt(match[1]));
+                          totalDays += Math.round((dueDate.getTime() - nfeDate.getTime()) / (86400000)); 
+                      });
+                      avgDays = totalDays / dateMatches.length;
+                  } else {
+                       const days = r.paymentTerms.split(/[-\/]/).map(d => parseInt(d)).filter(d => !isNaN(d) && d > 0 && d < 2000);
+                       if (days.length > 0) avgDays = days.reduce((a,b) => a+b, 0) / days.length;
+                  }
+                  orderTermCache[r.orderId] = avgDays;
+              }
+              if (avgDays >= 0) { totalWeightedDays += (avgDays * r.amount); totalSalesForTerm += r.amount; }
+            }
+          });
+          const avgTerm = totalSalesForTerm > 0 ? totalWeightedDays / totalSalesForTerm : 0;
+          return { totalRevenue, positivacao, totalOrders, averageTicket, skuPerPdv, avgInstallments, avgTerm };
+      };
+
+      const getClientStats = (data) => getStatsByGroup(data, (r) => r.cnpj);
+      const getRepStats = (data) => getStatsByGroup(data, (r) => r.salesRep);
+
+      const getStatsByGroup = (data, groupKeyFn) => {
+        const groups = {};
+        data.forEach(r => {
+          const key = groupKeyFn(r);
+          if (!key || key === 'N/A' || key === 'undefined') return;
+          if (!groups[key]) groups[key] = { records: [], name: key, region: r.region, sector: r.sector };
+          groups[key].records.push(r);
+          if (r.companyName && key === r.cnpj) groups[key].name = r.companyName; 
+        });
+        return Object.entries(groups).map(([id, group]) => {
+          const novRecords = group.records.filter(r => r.date.startsWith('2025-11'));
+          const novStats = calculateKPIs(novRecords);
+          const pastRecords = group.records.filter(r => ['2025-08', '2025-09', '2025-10'].includes(r.date.substring(0,7)));
+          const pastStats = calculateKPIs(pastRecords);
+          const avgPastRevenue = pastStats.totalRevenue / 3;
+          let revenueTrend = 0;
+          if (avgPastRevenue > 0) revenueTrend = ((novStats.totalRevenue - avgPastRevenue) / avgPastRevenue) * 100;
+          else if (novStats.totalRevenue > 0) revenueTrend = 100;
+          return {
+            id: id,
+            name: group.name,
+            revenue: novStats.totalRevenue,
+            averagePastRevenue: avgPastRevenue,
+            revenueTrend: revenueTrend,
+            orders: novStats.totalOrders,
+            skuPerPdv: novStats.skuPerPdv,
+            avgTicket: novStats.averageTicket,
+            avgInstallments: novStats.avgInstallments,
+            avgTerm: novStats.avgTerm,
+            region: group.region,
+            sector: group.sector
+          };
+        }).sort((a, b) => b.revenue - a.revenue);
+      };
+
+      const getProductStats = (data) => {
+          const map = {};
+          const novData = data.filter(r => r.date.startsWith('2025-11')); 
+          novData.forEach(r => {
+              if (!map[r.productCode]) map[r.productCode] = { code: r.productCode, desc: r.productDesc, revenue: 0, quantity: 0, supplier: r.supplier, uniqueClients: new Set(), uniqueOrders: new Set(), clientCount: 0, orderCount: 0 };
+              map[r.productCode].revenue += r.amount;
+              const qtyAbs = Math.abs(r.quantity);
+              map[r.productCode].quantity += (r.operClass === 'DV' ? -qtyAbs : qtyAbs);
+              if (r.operClass === 'VD') { map[r.productCode].uniqueClients.add(r.cnpj); map[r.productCode].uniqueOrders.add(r.orderId); }
+          });
+          return Object.values(map).map(p => ({ ...p, clientCount: p.uniqueClients.size, orderCount: p.uniqueOrders.size })).sort((a,b) => b.revenue - a.revenue);
+      };
+
+      const getGeoStats = (data) => {
+          const cityStats = {};
+          data.forEach(r => {
+              if (!r.city) return;
+              const coords = getCityCoords(r.city, r.state || '');
+              if (coords) {
+                  const state = r.state || 'BR';
+                  const finalCityName = r.city.toUpperCase().split('-')[0].trim();
+                  const key = `${finalCityName}-${state}`;
+                  if (!cityStats[key]) cityStats[key] = { city: finalCityName, state: state, lat: coords[0], lng: coords[1], revenue: 0, positivacao: 0 };
+                  cityStats[key].revenue += r.amount;
+                  if (r.amount > 0) cityStats[key].positivacao += 1;
+              }
+          });
+          return Object.values(cityStats).sort((a,b) => b.revenue - a.revenue);
+      };
+      
+      const getSectorPivotData = (data) => {
+        const months = Array.from(new Set(data.map(r => r.date.substring(0, 7)))).sort();
+        const sectors = Array.from(new Set(data.map(r => r.sector))).sort();
+        const closedMonths = ['2025-08', '2025-09', '2025-10'];
+        const monthTotals = {};
+        months.forEach(m => { monthTotals[m] = calculateKPIs(data.filter(r => r.date.startsWith(m))); });
+        
+        const calculateAverageOfMonths = (monthDataMap) => {
+            const stats = {};
+            const keys = ['totalRevenue', 'positivacao', 'totalOrders', 'averageTicket', 'skuPerPdv', 'avgInstallments', 'avgTerm'];
+            keys.forEach(key => {
+                let sum = 0; closedMonths.forEach(m => { if (monthDataMap[m]) sum += monthDataMap[m][key]; });
+                stats[key] = sum / 3;
+            });
+            return stats;
+        };
+        const grandTotal = calculateAverageOfMonths(monthTotals);
+        const rows = sectors.map(sector => {
+            const sectorRecords = data.filter(r => r.sector === sector);
+            const monthStats = {};
+            months.forEach(m => { monthStats[m] = calculateKPIs(sectorRecords.filter(r => r.date.startsWith(m))); });
+            const rowAverage = calculateAverageOfMonths(monthStats);
+            return { sector, months: monthStats, total: rowAverage };
+        });
+        rows.sort((a, b) => b.total.totalRevenue - a.total.totalRevenue);
+        return { rows, months, monthTotals, grandTotal };
+      };
+
+      // --- GEMINI SERVICE ---
+      const generateStrategicInsights = async (currentKpis, avgKpis, filters, topClients, topProducts, topReps) => {
+        if (!window.GoogleGenerativeAI) return "Aguarde carregamento da IA...";
+        try {
+            const genAI = new window.GoogleGenerativeAI(API_KEY);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+            const fmt = (v) => v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+            const diff = (curr, avg) => avg === 0 ? 0 : ((curr - avg) / avg) * 100;
+            
+            const revDiff = diff(currentKpis.totalRevenue, avgKpis.totalRevenue);
+            const posDiff = diff(currentKpis.positivacao, avgKpis.positivacao);
+            const skuDiff = diff(currentKpis.skuPerPdv, avgKpis.skuPerPdv);
+            const termDiff = diff(currentKpis.avgTerm, avgKpis.avgTerm);
+
+            const context = `
+              ATUE COMO: Consultor de Inteligência Comercial (O "Segundo Cérebro" do Gerente).
+              SAZONALIDADE: Novembro (Pré-Verão).
+              DADOS (NOVEMBRO vs MÉDIA):
+              1. FATURAMENTO: R$ ${fmt(currentKpis.totalRevenue)} (Var: ${revDiff.toFixed(1)}%)
+              2. POSITIVAÇÃO: ${currentKpis.positivacao} clientes (Var: ${posDiff.toFixed(1)}%)
+              3. SKU x PDV: ${currentKpis.skuPerPdv.toFixed(2)} (Var: ${skuDiff.toFixed(1)}%)
+              4. PRAZO MÉDIO: ${currentKpis.avgTerm.toFixed(0)} dias (Var: ${termDiff.toFixed(1)}%)
+
+              TOP PRODUTOS: ${topProducts.slice(0, 5).map(p => p.name).join(', ')}
+              FILTROS: ${filters.region.join(', ')}
+
+              GERE 3 INSIGHTS CURTOS E ESTRATÉGICOS:
+              ### 🧠 CORRELAÇÃO DE INDICADORES
+              ### 🌞 OPORTUNIDADES DE MIX (SAZONALIDADE)
+              ### 🚀 AÇÃO TÁTICA SUGERIDA
+            `;
+
+            const result = await model.generateContent(context);
+            const response = await result.response;
+            return response.text();
+        } catch (error) {
+            console.error("Gemini API Error:", error);
+            return "Erro ao gerar insights. Verifique a chave de API.";
+        }
+      };
+
+      // --- COMPONENTS ---
+      const StatCard = ({ title, value, trend, icon, trendLabel }) => {
+        const isPositive = trend && trend >= 0;
+        return (
+          <div className="bg-card rounded-xl p-6 border border-white/5 relative overflow-hidden">
+            <div className="flex items-center justify-between mb-4 relative z-10">
+              <h3 className="text-xs font-bold text-text-dim uppercase tracking-wider">{title}</h3>
+              {icon && <div className="text-primary opacity-80 text-xl">{icon}</div>}
+            </div>
+            <div className="relative z-10">
+              <div className="text-2xl font-bold text-text-main tracking-tight font-mono">{value}</div>
+              {trend !== undefined && (
+                <div className={`flex items-center mt-2 text-sm ${isPositive ? 'text-success' : 'text-danger'}`}>
+                  <span className="font-bold">{isPositive ? '+' : ''}{trend.toFixed(1)}%</span>
+                  <span className="ml-2 text-text-dim text-xs font-medium opacity-60">{trendLabel}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      };
+
+      const SalesHeatmap = ({ data }) => {
+        const mapRef = useRef(null);
+        
+        useEffect(() => {
+          if (!document.getElementById('map-container')) return;
+          
+          if (!mapRef.current) {
+            mapRef.current = L.map('map-container').setView([-25.4284, -49.2733], 6);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+              attribution: '&copy; OpenStreetMap &copy; CARTO'
+            }).addTo(mapRef.current);
+          }
+
+          mapRef.current.eachLayer((layer) => {
+            if (layer instanceof L.CircleMarker) mapRef.current.removeLayer(layer);
+          });
+
+          data.slice(0, 500).forEach(city => {
+             if (city.revenue <= 0) return;
+             const radius = Math.max(Math.log(city.revenue) * 1.5, 3);
+             const color = city.revenue > 10000 ? '#ef4444' : city.revenue > 5000 ? '#f59e0b' : '#10b981';
+             
+             L.circleMarker([city.lat, city.lng], {
+               radius: Math.min(radius, 20),
+               color: 'transparent',
+               fillColor: color,
+               fillOpacity: 0.6
+             })
+             .bindPopup(`<b>${city.city}</b><br>R$ ${city.revenue.toLocaleString('pt-BR', {maximumFractionDigits:0})}`)
+             .addTo(mapRef.current);
+          });
+
+        }, [data]);
+
+        return <div id="map-container" className="h-[500px] w-full rounded-b-xl z-0 border border-white/5"></div>;
+      };
+
+      const InsightsPanel = ({ kpis, avgKpis, filters, topClients, topProducts, topReps }) => {
+        const [insight, setInsight] = useState("");
+        const [loading, setLoading] = useState(false);
+
+        const fetchInsights = async () => {
+          setLoading(true);
+          const result = await generateStrategicInsights(kpis, avgKpis, filters, topClients, topProducts, topReps);
+          setInsight(result);
+          setLoading(false);
+        };
+
+        useEffect(() => { 
+            if (filters.region.length > 0 || filters.division.length > 0) fetchInsights(); 
+        }, [filters]);
+
+        return (
+          <div className="bg-card/50 backdrop-blur-md rounded-xl border border-primary/20 p-6 shadow-2xl h-full flex flex-col">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-text-main">AI Sales Consultant</h2>
+              <button onClick={fetchInsights} disabled={loading} className="px-3 py-1 bg-primary/10 text-primary text-xs font-bold rounded hover:bg-primary/20 transition-colors">
+                  {loading ? '...' : 'Atualizar'}
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto text-text-dim text-xs prose prose-invert custom-scrollbar" dangerouslySetInnerHTML={{ 
+                  __html: insight.replace(/\n/g, '<br />').replace(/### (.*)/g, '<h3 class="text-primary font-bold mt-4 mb-2 uppercase">$1</h3>').replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+            }} />
+          </div>
+        );
+      };
+
+      // --- MAIN APP ---
+      function App() {
+        const [allData, setAllData] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [isSetupComplete, setIsSetupComplete] = useState(false);
+        const [errorMsg, setErrorMsg] = useState("");
+        
+        const [selectedChannels, setSelectedChannels] = useState([]);
+        const [selectedRegions, setSelectedRegions] = useState([]);
+        const [selectedDivisions, setSelectedDivisions] = useState([]);
+        const [filters, setFilters] = useState({ division: [], region: [], sector: [], salesRep: [], channel: [], supplier: [], startMonth: '2025-08', endMonth: '2025-11' });
+        
+        const [activeTab, setActiveTab] = useState('clients');
+        const [searchTerm, setSearchTerm] = useState('');
+        const [currentPage, setCurrentPage] = useState(1);
+        const ITEMS_PER_PAGE = 30;
+
+        useEffect(() => {
+          if (window.google && window.google.script) {
+              google.script.run
+                .withSuccessHandler((jsonStr) => {
+                    const data = JSON.parse(jsonStr);
+                    setAllData(data);
+                    setLoading(false);
+                })
+                .withFailureHandler((err) => {
+                    setErrorMsg("Erro ao carregar dados: " + err.message);
+                    setLoading(false);
+                })
+                .getDadosVendas();
+          } else {
+              setErrorMsg("Ambiente fora do Google Apps Script.");
+              setLoading(false);
+          }
+        }, []);
+
+        const availableChannels = useMemo(() => Array.from(new Set(allData.map(r => r.channel))).filter(Boolean).sort(), [allData]);
+        const availableRegions = useMemo(() => {
+            let data = allData;
+            if (selectedChannels.length > 0) data = data.filter(r => selectedChannels.includes(r.channel));
+            return Array.from(new Set(data.map(r => r.region))).filter(Boolean).sort();
+        }, [allData, selectedChannels]);
+        const availableDivisions = useMemo(() => {
+            let data = allData;
+            if (selectedChannels.length > 0) data = data.filter(r => selectedChannels.includes(r.channel));
+            if (selectedRegions.length > 0) data = data.filter(r => selectedRegions.includes(r.region));
+            return Array.from(new Set(data.map(r => r.division))).filter(Boolean).sort();
+        }, [allData, selectedRegions, selectedChannels]);
+
+        const fullPeriodData = useMemo(() => filterData(allData, filters), [allData, filters]);
+        const currentMonthData = useMemo(() => filterData(allData, { ...filters, startMonth: '2025-11', endMonth: '2025-11' }), [allData, filters]);
+        
+        const currentMonthKPIs = useMemo(() => calculateKPIs(currentMonthData), [currentMonthData]);
+        const avgHistoryKPIs = useMemo(() => {
+            const d = filterData(allData, { ...filters, startMonth: '2025-08', endMonth: '2025-10' });
+            const stats = calculateKPIs(d);
+            return {
+                totalRevenue: stats.totalRevenue / 3,
+                positivacao: stats.positivacao / 3,
+                totalOrders: stats.totalOrders / 3,
+                averageTicket: stats.averageTicket,
+                skuPerPdv: stats.skuPerPdv,
+                avgInstallments: stats.avgInstallments,
+                avgTerm: stats.avgTerm
+            };
+        }, [allData, filters]);
+
+        const pivotData = useMemo(() => getSectorPivotData(fullPeriodData), [fullPeriodData]);
+        const clientStats = useMemo(() => getClientStats(fullPeriodData), [fullPeriodData]);
+        const productStats = useMemo(() => getProductStats(fullPeriodData), [fullPeriodData]);
+        const topReps = useMemo(() => getRepStats(fullPeriodData).slice(0, 5).map(r => ({ id: r.id, name: r.name, value: r.revenue })), [fullPeriodData]);
+        const geoStats = useMemo(() => getGeoStats(fullPeriodData), [fullPeriodData]);
+
+        const handleSetupComplete = () => {
+            setFilters(prev => ({ ...prev, channel: selectedChannels, region: selectedRegions, division: selectedDivisions }));
+            setIsSetupComplete(true);
+        };
+
+        const currentData = useMemo(() => {
+            let d = [];
+            if (activeTab === 'clients') d = clientStats;
+            else if (activeTab === 'products') d = productStats;
+            if (searchTerm) d = d.filter(i => (i.name || i.desc).toLowerCase().includes(searchTerm.toLowerCase()));
+            return d;
+        }, [activeTab, clientStats, productStats, searchTerm]);
+
+        const paginatedData = currentData.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+        const totalPages = Math.ceil(currentData.length / ITEMS_PER_PAGE);
+
+        if (loading) return <div className="min-h-screen bg-background flex items-center justify-center text-white animate-pulse">Sincronizando dados com o Google...</div>;
+        if (errorMsg) return <div className="min-h-screen bg-background flex items-center justify-center text-danger p-4 text-center">{errorMsg}</div>;
+
+        if (!isSetupComplete) {
+            return (
+                <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden">
+                    <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full"></div>
+                    <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full"></div>
+                    <div className="bg-card p-8 sm:p-12 rounded-2xl shadow-2xl max-w-lg w-full border border-white/5 z-10 backdrop-blur-sm">
+                        <div className="text-center mb-10">
+                            <img src="https://i.postimg.cc/xcbthdSs/Logo-DP4-branca.png" alt="DP4 Logo" className="h-20 mx-auto mb-6 object-contain" />
+                            <h1 className="text-2xl font-bold text-text-main mb-2">Bem-vindo ao Assistente AI</h1>
+                            <p className="text-text-dim text-sm">Configure sua visualização para acessar o painel.</p>
+                        </div>
+                        <div className="space-y-6">
+                            <MultiSelectDropdown label="Selecione os Canais" options={availableChannels} selected={selectedChannels} onChange={(newSelected) => { setSelectedChannels(newSelected); setSelectedRegions([]); setSelectedDivisions([]); }} />
+                            <MultiSelectDropdown label="Selecione as Regiões" options={availableRegions} selected={selectedRegions} onChange={(newSelected) => { setSelectedRegions(newSelected); setSelectedDivisions([]); }} disabled={selectedChannels.length === 0} />
+                            <MultiSelectDropdown label="Selecione as Divisões" options={availableDivisions} selected={selectedDivisions} onChange={setSelectedDivisions} disabled={selectedRegions.length === 0} />
+                            <button onClick={handleSetupComplete} disabled={selectedChannels.length === 0 || selectedRegions.length === 0 || selectedDivisions.length === 0} className="w-full bg-primary text-background font-bold py-4 rounded-lg mt-4 hover:bg-primary/90 transition-all shadow-lg disabled:opacity-50 disabled:shadow-none uppercase tracking-widest">ACESSAR DASHBOARD</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+          <div className="min-h-screen bg-background text-text-main font-sans pb-10 selection:bg-primary selection:text-background">
+            <header className="bg-card/80 backdrop-blur border-b border-white/5 sticky top-0 z-30 px-6 h-20 flex items-center justify-between shadow-lg">
+                <div className="flex items-center gap-4">
+                    <img src="https://i.postimg.cc/xcbthdSs/Logo-DP4-branca.png" alt="Logo" className="h-10 w-auto object-contain" />
+                    <div>
+                        <h1 className="text-xl font-bold text-white tracking-tight">Dashboard de Vendas</h1>
+                        <p className="text-[10px] text-text-dim font-medium uppercase tracking-wider mt-0.5">Visão Executiva • <span className="text-primary">Novembro 2025</span></p>
+                    </div>
+                </div>
+                <button onClick={() => setIsSetupComplete(false)} className="text-xs text-text-dim hover:text-white border border-white/10 px-3 py-1.5 rounded hover:bg-white/5 transition-all uppercase font-bold tracking-wider">Alterar Filtros</button>
+            </header>
+
+            <main className="px-6 py-8 max-w-[1920px] mx-auto space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                  <StatCard title="Faturamento (Nov)" value={`R$ ${currentMonthKPIs.totalRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`} trend={((currentMonthKPIs.totalRevenue - avgHistoryKPIs.totalRevenue)/avgHistoryKPIs.totalRevenue)*100} trendLabel="vs Média 3 Meses" icon="💰" />
+                  <StatCard title="Positivação (Nov)" value={currentMonthKPIs.positivacao} trend={((currentMonthKPIs.positivacao - avgHistoryKPIs.positivacao)/avgHistoryKPIs.positivacao)*100} trendLabel="vs Média 3 Meses" icon="👥" />
+                  <StatCard title="Ticket Médio (Nov)" value={`R$ ${currentMonthKPIs.averageTicket.toLocaleString('pt-BR', {minimumFractionDigits: 0})}`} trend={((currentMonthKPIs.averageTicket - avgHistoryKPIs.averageTicket)/avgHistoryKPIs.averageTicket)*100} trendLabel="vs Média 3 Meses" icon="📈" />
+                  <StatCard title="SKU x PDV (Nov)" value={currentMonthKPIs.skuPerPdv.toFixed(2)} trend={((currentMonthKPIs.skuPerPdv - avgHistoryKPIs.skuPerPdv)/avgHistoryKPIs.skuPerPdv)*100} trendLabel="vs Média 3 Meses" icon="📊" />
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+                  <div className="xl:col-span-3 space-y-8">
+                       <div className="bg-card rounded-xl border border-white/5 shadow-lg overflow-hidden flex flex-col">
+                           <div className="px-6 py-4 border-b border-white/5 bg-card/50"><h3 className="text-xs font-bold text-text-dim uppercase tracking-widest">Performance por Setor (Evolução Mensal)</h3></div>
+                           <div className="overflow-x-auto custom-scrollbar">
+                              <table className="w-full text-xs text-right">
+                                  <thead className="bg-white/5 text-text-dim uppercase font-mono">
+                                      <tr><th className="px-4 py-3 text-left sticky left-0 bg-[#1A233A] z-10">Setor</th><th className="px-4 py-3">Ago</th><th className="px-4 py-3">Set</th><th className="px-4 py-3">Out</th><th className="px-4 py-3 text-primary font-bold bg-primary/5">Nov</th><th className="px-4 py-3">Média</th></tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-white/5">
+                                      {pivotData.rows.map((row, i) => (
+                                          <tr key={i} className="hover:bg-white/5 transition-colors">
+                                              <td className="px-4 py-3 text-left font-bold text-text-dim sticky left-0 bg-card z-10 border-r border-white/5">{row.sector}</td>
+                                              <td className="px-4 py-3">R$ {row.months['2025-08']?.totalRevenue.toLocaleString('pt-BR',{maximumFractionDigits:0}) || '-'}</td>
+                                              <td className="px-4 py-3">R$ {row.months['2025-09']?.totalRevenue.toLocaleString('pt-BR',{maximumFractionDigits:0}) || '-'}</td>
+                                              <td className="px-4 py-3">R$ {row.months['2025-10']?.totalRevenue.toLocaleString('pt-BR',{maximumFractionDigits:0}) || '-'}</td>
+                                              <td className="px-4 py-3 text-primary font-bold bg-primary/5 border-l border-r border-primary/10">R$ {row.months['2025-11']?.totalRevenue.toLocaleString('pt-BR',{maximumFractionDigits:0}) || '-'}</td>
+                                              <td className="px-4 py-3 bg-white/5 font-medium text-white">R$ {row.total.totalRevenue.toLocaleString('pt-BR',{maximumFractionDigits:0})}</td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                           </div>
+                       </div>
+
+                       <div className="bg-card rounded-xl border border-white/5 overflow-hidden shadow-lg">
+                           <div className="p-4 border-b border-white/5 flex justify-between items-center bg-card/50">
+                               <div className="flex gap-6">
+                                   <button onClick={() => { setActiveTab('clients'); setCurrentPage(1); }} className={`text-xs font-bold uppercase tracking-wider pb-1 border-b-2 transition-all ${activeTab === 'clients' ? 'border-primary text-primary' : 'border-transparent text-text-dim hover:text-white'}`}>Clientes</button>
+                                   <button onClick={() => { setActiveTab('products'); setCurrentPage(1); }} className={`text-xs font-bold uppercase tracking-wider pb-1 border-b-2 transition-all ${activeTab === 'products' ? 'border-primary text-primary' : 'border-transparent text-text-dim hover:text-white'}`}>Produtos</button>
+                               </div>
+                               <input type="text" placeholder="Filtrar..." className="bg-background border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:border-primary focus:outline-none w-48 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                           </div>
+                           <div className="overflow-x-auto">
+                              <table className="w-full text-xs text-left">
+                                  <thead className="bg-white/5 text-text-dim uppercase font-bold sticky top-0 z-10">
+                                      <tr>
+                                          <th className="px-6 py-3">{activeTab === 'clients' ? 'Cliente' : 'Código'}</th>
+                                          <th className="px-6 py-3">{activeTab === 'clients' ? 'Região' : 'Descrição'}</th>
+                                          <th className="px-6 py-3 text-right">Faturamento (Nov)</th>
+                                          <th className="px-6 py-3 text-right">{activeTab === 'clients' ? 'SKU x PDV' : 'Qtd Líquida'}</th>
+                                          <th className="px-6 py-3 text-right">Pedidos</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-white/5">
+                                      {paginatedData.map((item, idx) => (
+                                          <tr key={idx} className="hover:bg-white/5 transition-colors group">
+                                              <td className="px-6 py-3 font-bold text-white truncate max-w-[200px] group-hover:text-primary transition-colors">{activeTab === 'clients' ? item.name : item.code}</td>
+                                              <td className="px-6 py-3 text-text-dim">{activeTab === 'clients' ? item.region : item.desc}</td>
+                                              <td className="px-6 py-3 text-right text-success font-bold font-mono">R$ {item.revenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</td>
+                                              <td className="px-6 py-3 text-right text-text-dim font-mono">{activeTab === 'clients' ? (item.skuPerPdv?.toFixed(2)) : item.quantity}</td>
+                                              <td className="px-6 py-3 text-right text-text-dim">{activeTab === 'clients' ? item.orders : item.orderCount}</td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                           </div>
+                           <div className="px-6 py-3 border-t border-white/5 bg-card/50 flex justify-between items-center">
+                               <span className="text-[10px] text-text-dim uppercase font-bold">Página {currentPage} de {totalPages}</span>
+                               <div className="flex gap-2">
+                                   <button disabled={currentPage===1} onClick={() => setCurrentPage(p=>p-1)} className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] uppercase font-bold text-white disabled:opacity-30 transition-all">Anterior</button>
+                                   <button disabled={currentPage===totalPages} onClick={() => setCurrentPage(p=>p+1)} className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] uppercase font-bold text-white disabled:opacity-30 transition-all">Próximo</button>
+                               </div>
+                           </div>
+                       </div>
+                  </div>
+
+                  <div className="xl:col-span-1">
+                      <div className="sticky top-24 h-full">
+                          <InsightsPanel kpis={currentMonthKPIs} avgKpis={avgHistoryKPIs} filters={filters} topClients={clientStats.slice(0,5).map(c=>({name: c.name}))} topProducts={productStats.slice(0,5).map(p=>({name: p.desc}))} topReps={topReps} />
+                      </div>
+                  </div>
+              </div>
+
+              <div className="bg-card rounded-xl border border-white/5 shadow-xl p-6 mt-8">
+                  <h2 className="text-lg font-bold text-white mb-2">Mapa de Calor de Vendas</h2>
+                  <p className="text-xs text-text-dim mb-4">Concentração Geográfica de Faturamento (Novembro)</p>
+                  <SalesHeatmap data={geoStats} />
+              </div>
+
+            </main>
+          </div>
+        );
+      }
+
+      const root = createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+</body>
+</html>
